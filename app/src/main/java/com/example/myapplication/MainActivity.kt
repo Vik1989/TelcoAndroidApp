@@ -12,6 +12,7 @@ import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.not
 import com.example.myapplication.R.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,9 +39,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var sinrTextView: TextView
     private lateinit var testSpeedButton: Button
 
+    private lateinit var caInfoTextView: TextView
+    private var currentSignalStrength: SignalStrength? = null
+
     companion object {
         private const val PERMISSIONS_REQUEST_CODE = 100
-        private const val TEST_FILE_URL = "https://nbg1-speed.hetzner.com/100MB.bin" // Example URL
+        private const val TEST_FILE_URL = "https://proof.ovh.net/files/10Mb.dat" // Example URL
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -56,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         rssiTextView = findViewById(id.rssiTextView) // Initialize RSSI TextView
         sinrTextView = findViewById(id.sinrTextView)
         testSpeedButton = findViewById(id.testSpeedButton)
-
+        caInfoTextView = findViewById(id.caInfoTextView)
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
 
         testSpeedButton.setOnClickListener {
@@ -150,6 +154,7 @@ class MainActivity : AppCompatActivity() {
                 @Deprecated("Deprecated in Java")
                 override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
                     super.onSignalStrengthsChanged(signalStrength)
+                    currentSignalStrength = signalStrength
                     updateNetworkInfo() // Update on signal strength change too
                 }
             }
@@ -182,68 +187,45 @@ class MainActivity : AppCompatActivity() {
                     rsrqTextView.text = "RSRQ: N/A"
                     rssiTextView.text = "RSSI: N/A"
                     sinrTextView.text = "SINR: N/A"
+                    caInfoTextView.text = "CA: N/A"
                 }
                 return
             }
 
-            var primaryCellProcessed = false
-            for (cellInfo in allCellInfo) {
-                if (cellInfo.isRegistered) { // Process the primary (registered) cell
-                    when (cellInfo) {
-                        is CellInfoLte -> {
-                            val cellIdentity = cellInfo.cellIdentity as CellIdentityLte
-                            val signalStrength =
-                                cellInfo.cellSignalStrength as CellSignalStrengthLte
-                            displayLteInfo(cellIdentity, signalStrength)
-                            primaryCellProcessed = true
-                        }
+            val registeredCells = allCellInfo.filter { it.isRegistered }
 
-                        is CellInfoNr -> {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                val cellIdentity = cellInfo.cellIdentity as CellIdentityNr
-                                val signalStrength =
-                                    cellInfo.cellSignalStrength as CellSignalStrengthNr
-                                displayNrInfo(cellIdentity, signalStrength)
-                                primaryCellProcessed = true
-                            }
-                        }
-
-                        is CellInfoGsm -> {
-                            val cellIdentity = cellInfo.cellIdentity as CellIdentityGsm
-                            val signalStrength =
-                                cellInfo.cellSignalStrength as CellSignalStrengthGsm
-                            displayGsmInfo(cellIdentity, signalStrength)
-                            primaryCellProcessed = true
-                        }
-                        // Add other cell types like CellInfoCdma if needed
+            if (registeredCells.isNotEmpty()) {
+                val primaryCell = registeredCells.first()
+                when (primaryCell) {
+                    is CellInfoLte -> {
+                        val cellIdentity = primaryCell.cellIdentity as CellIdentityLte
+                        val signalStrength = primaryCell.cellSignalStrength as CellSignalStrengthLte
+                        displayLteInfo(cellIdentity, signalStrength)
                     }
-                    if (primaryCellProcessed) break // Exit after processing the primary registered cell
+                    is CellInfoNr -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val cellIdentity = primaryCell.cellIdentity as CellIdentityNr
+                            val signalStrength = primaryCell.cellSignalStrength as CellSignalStrengthNr
+                            displayNrInfo(cellIdentity, signalStrength)
+                        }
+                    }
+                    is CellInfoGsm -> {
+                        val cellIdentity = primaryCell.cellIdentity as CellIdentityGsm
+                        val signalStrength = primaryCell.cellSignalStrength as CellSignalStrengthGsm
+                        displayGsmInfo(cellIdentity, signalStrength)
+                    }
                 }
-            }
-            if (!primaryCellProcessed) {
-                // If no registered cell was found among the list (should be rare if connected)
-                // Or if the registered cell is of a type not yet handled (e.g. CDMA and you haven't added it)
-                // You could try to display info from the first cell if available, or indicate "Not Registered"
-                val firstCellInfo = allCellInfo.firstOrNull()
-                if (firstCellInfo != null) {
-                    // Fallback: Display info for the first available cell if no registered one was processed
-                    // This logic might need refinement based on desired behavior
-                    // For now, let's just clear or indicate no primary registered cell of known type found
-                    displayNoSpecificCellTypeInfo()
-                } else {
-                    displayNoSpecificCellTypeInfo()
-                }
+                displayCaInfo(registeredCells)
+            } else {
+                displayNoSpecificCellTypeInfo()
             }
         } catch (e: SecurityException) {
             runOnUiThread {
                 bandTextView.text = "Permissions error"
-                // Handle other TextViews as well
             }
-            // Log.e("NetworkInfo", "SecurityException in updateNetworkInfo: ${e.message}")
         } catch (e: Exception) {
             runOnUiThread {
                 bandTextView.text = "Error updating info"
-                // Log.e("NetworkInfo", "Exception in updateNetworkInfo: ${e.message}")
             }
         }
     }
@@ -360,7 +342,6 @@ class MainActivity : AppCompatActivity() {
             rssi =
                 if (signalStrength.rssi != CellInfo.UNAVAILABLE) "${signalStrength.rssi} dBm" else "N/A"
         }
-
 
         runOnUiThread {
             bandTextView.text = "Network: LTE $band"
@@ -494,7 +475,58 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun displayCaInfo(allCellInfo: List<CellInfo>) {
+        val lteCells = allCellInfo.filterIsInstance<CellInfoLte>()
 
+        if (lteCells.isEmpty()) {
+            runOnUiThread {
+                caInfoTextView.text = "CA: No LTE Cells Found"
+            }
+            return
+        }
+
+        val caConfig = StringBuilder()
+        if (lteCells.size > 1) {
+            caConfig.append("LTE CA Active: (${lteCells.size}CC)\n")
+        } else {
+            caConfig.append("LTE: 1CC\n")
+        }
+
+        // Sort cells to ensure primary is first, although it's usually at index 0 or is the first to be "isRegistered"
+        val sortedLteCells = lteCells.sortedByDescending { it.isRegistered }
+
+        sortedLteCells.forEachIndexed { index, cellInfo ->
+            val cellIdentity = cellInfo.cellIdentity as CellIdentityLte
+            val signalStrength = cellInfo.cellSignalStrength as CellSignalStrengthLte
+
+            val status = if (cellInfo.isRegistered) "Primary (PCell)" else "Secondary (SCell)"
+            val earfcn = if (cellIdentity.earfcn != CellInfo.UNAVAILABLE) cellIdentity.earfcn.toString() else "N/A"
+
+            caConfig.append("$status: EARFCN: $earfcn")
+
+            // The getCellBandwidths() method is the key to getting bandwidths
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) { // API 28
+                try {
+                    // This is a direct check on the CellInfo object for bandwidth
+                    val bandwidth = cellIdentity.bandwidth
+                    if (bandwidth != CellInfo.UNAVAILABLE) {
+                        caConfig.append(", BW: ${bandwidth / 1000}MHz")
+                    }
+                } catch (e: Exception) {
+                    // Handle exceptions on specific devices
+                }
+            }
+
+            // Add signal strength details for each carrier
+            val rsrp = if (signalStrength.rsrp != CellInfo.UNAVAILABLE) "RSRP:${signalStrength.rsrp}dBm" else "RSRP:N/A"
+            caConfig.append(", $rsrp\n")
+        }
+
+        runOnUiThread {
+            caInfoTextView.text = caConfig.toString()
+        }
+    }
     private fun runSpeedTest() {
         downloadSpeedTextView.text = "Download Speed: Testing..."
 
@@ -523,10 +555,10 @@ class MainActivity : AppCompatActivity() {
                 while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                     downloadedBytes += bytesRead
                     // Optional: Update progress during download
-                    // val progress = (downloadedBytes * 100 / (100 * 1024 * 1024)).toInt() // Assuming 100MB file
-                    // launch(Dispatchers.Main) {
-                    //    downloadSpeedTextView.text = "Download Speed: Testing... $progress%"
-                    // }
+                     val progress = (downloadedBytes * 100 / (100 * 1024 * 1024)).toInt() // Assuming 100MB file
+                    launch(Dispatchers.Main) {
+                        downloadSpeedTextView.text = "Download Speed: Testing... $progress%"
+                     }
                 }
                 inputStream.close()
                 val endTime = System.currentTimeMillis()
