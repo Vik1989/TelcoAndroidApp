@@ -4,101 +4,285 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:paddingTop="32dp"
+    android:background="#F0F0F0"
+    android:padding="24dp"
     tools:context=".MainActivity">
 
     <TextView
-        android:id="@+id/downloadSpeedTextView"
+        android:id="@+id/appTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Download Speed: Loading..."
-        android:textSize="18sp"
+        android:text="Network Signal Monitor"
+        android:textSize="24sp"
         android:textStyle="bold"
+        android:textColor="@android:color/black"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="16dp" />
 
-    <TextView
-        android:id="@+id/bandTextView"
-        android:layout_width="wrap_content"
+    <androidx.cardview.widget.CardView
+        android:id="@+id/speedCard"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Network Band: Loading..."
-        app:layout_constraintTop_toBottomOf="@+id/downloadSpeedTextView"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="16dp" />
+        android:layout_marginTop="24dp"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="4dp"
+        android:backgroundTint="@android:color/white"
+        app:layout_constraintTop_toBottomOf="@+id/appTitle">
 
-    <TextView
-        android:id="@+id/cellsiteIdTextView"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="Cell Site ID: Loading..."
-        app:layout_constraintTop_toBottomOf="@+id/bandTextView"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginTop="8dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
 
-    <TextView
-        android:id="@+id/rsrpTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="RSRP: Loading..."
-        app:layout_constraintTop_toBottomOf="@+id/cellsiteIdTextView"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="8dp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Download Speed"
+                android:textSize="14sp"
+                android:textColor="#555555"/>
 
-    <TextView
-        android:id="@+id/rsrqTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="RSRQ: Loading..."
-        app:layout_constraintTop_toBottomOf="@+id/rsrpTextView"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="8dp" />
+            <TextView
+                android:id="@+id/downloadSpeedTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Testing..."
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp"
+                android:textColor="@android:color/black"/>
 
-    <TextView
-        android:id="@+id/rssiTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="RSSI: Loading..."
-        app:layout_constraintTop_toBottomOf="@+id/rsrqTextView"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="8dp" />
+            <Button
+                android:id="@+id/testSpeedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="16dp"
+                android:text="Run Speed Test"
+                style="@style/Widget.AppCompat.Button.Colored"
+                android:textColor="@android:color/white"
+                android:backgroundTint="#007BFF"/>
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
 
-    <TextView
-        android:id="@+id/sinrTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="SINR: Loading..."
-        app:layout_constraintTop_toBottomOf="@+id/rssiTextView"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="8dp" />
+    <androidx.cardview.widget.CardView
+        android:id="@+id/infoCard"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="24dp"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="4dp"
+        android:backgroundTint="@android:color/white"
+        app:layout_constraintTop_toBottomOf="@+id/speedCard"
+        app:layout_constraintBottom_toBottomOf="parent">
 
-    <TextView
-        android:id="@+id/caInfoTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="CA: Loading..."
-        app:layout_constraintTop_toBottomOf="@+id/sinrTextView"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="8dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="16dp">
 
-    <Button
-        android:id="@+id/testSpeedButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Test Download Speed"
-        app:layout_constraintTop_toBottomOf="@+id/sinrTextView"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="24dp" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Network Information"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@android:color/black"
+                android:layout_marginBottom="12dp"/>
 
+            <TextView
+                android:id="@+id/bandTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Network: Loading..."
+                android:layout_marginBottom="4dp"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/cellsiteIdTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cell ID: Loading..."
+                android:layout_marginBottom="4dp"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/caInfoTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CA: Loading..."
+                android:layout_marginBottom="12dp"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#DDDDDD"
+                android:layout_marginBottom="16dp"/>
+
+            <GridLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:columnCount="2"
+                android:rowCount="2"
+                android:alignmentMode="alignMargins"
+                android:columnOrderPreserved="false">
+
+                <androidx.cardview.widget.CardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_columnWeight="1"
+                    android:layout_rowWeight="1"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    app:cardCornerRadius="8dp"
+                    app:cardElevation="2dp"
+                    android:backgroundTint="#F8F8F8">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:gravity="center_horizontal">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="RSRP"
+                            android:textSize="14sp"
+                            android:textColor="#555555"
+                            android:textStyle="bold"/>
+                        <TextView
+                            android:id="@+id/rsrpTextView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Loading..."
+                            android:textSize="18sp"
+                            android:textStyle="bold"
+                            android:textColor="@android:color/black"
+                            android:layout_marginTop="4dp"/>
+                    </LinearLayout>
+                </androidx.cardview.widget.CardView>
+
+                <androidx.cardview.widget.CardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_columnWeight="1"
+                    android:layout_rowWeight="1"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    app:cardCornerRadius="8dp"
+                    app:cardElevation="2dp"
+                    android:backgroundTint="#F8F8F8">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:gravity="center_horizontal">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="RSRQ"
+                            android:textSize="14sp"
+                            android:textColor="#555555"
+                            android:textStyle="bold"/>
+                        <TextView
+                            android:id="@+id/rsrqTextView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Loading..."
+                            android:textSize="18sp"
+                            android:textStyle="bold"
+                            android:textColor="@android:color/black"
+                            android:layout_marginTop="4dp"/>
+                    </LinearLayout>
+                </androidx.cardview.widget.CardView>
+
+                <androidx.cardview.widget.CardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_columnWeight="1"
+                    android:layout_rowWeight="1"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    app:cardCornerRadius="8dp"
+                    app:cardElevation="2dp"
+                    android:backgroundTint="#F8F8F8">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:gravity="center_horizontal">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="RSSI"
+                            android:textSize="14sp"
+                            android:textColor="#555555"
+                            android:textStyle="bold"/>
+                        <TextView
+                            android:id="@+id/rssiTextView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Loading..."
+                            android:textSize="18sp"
+                            android:textStyle="bold"
+                            android:textColor="@android:color/black"
+                            android:layout_marginTop="4dp"/>
+                    </LinearLayout>
+                </androidx.cardview.widget.CardView>
+
+                <androidx.cardview.widget.CardView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_columnWeight="1"
+                    android:layout_rowWeight="1"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="8dp"
+                    app:cardCornerRadius="8dp"
+                    app:cardElevation="2dp"
+                    android:backgroundTint="#F8F8F8">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:gravity="center_horizontal">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="SINR"
+                            android:textSize="14sp"
+                            android:textColor="#555555"
+                            android:textStyle="bold"/>
+                        <TextView
+                            android:id="@+id/sinrTextView"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Loading..."
+                            android:textSize="18sp"
+                            android:textStyle="bold"
+                            android:textColor="@android:color/black"
+                            android:layout_marginTop="4dp"/>
+                    </LinearLayout>
+                </androidx.cardview.widget.CardView>
+
+            </GridLayout>
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
 </androidx.constraintlayout.widget.ConstraintLayout>

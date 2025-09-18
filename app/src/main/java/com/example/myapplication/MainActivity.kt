@@ -2,6 +2,7 @@ package com.example.myapplication
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.telephony.*
@@ -325,34 +326,60 @@ class MainActivity : AppCompatActivity() {
         val cellsiteIdText = "PCI: $pci, TAC: $tac, CI: $ci"
 
 
-        val rsrp =
-            if (signalStrength.rsrp != CellInfo.UNAVAILABLE) "${signalStrength.rsrp} dBm" else "N/A"
-        val rsrq =
-            if (signalStrength.rsrq != CellInfo.UNAVAILABLE) "${signalStrength.rsrq} dB" else "N/A"
-        // SINR (RSSNR) is often problematic and might not be reliably available on all devices/networks.
-        val sinr =
-            if (signalStrength.rssnr != CellInfo.UNAVAILABLE && signalStrength.rssnr != Integer.MAX_VALUE) {
-                "${signalStrength.rssnr} dB"
-            } else {
-                "N/A"
-            }
+        val rsrpValue = signalStrength.rsrp
+        val rsrp = if (rsrpValue != CellInfo.UNAVAILABLE) "$rsrpValue dBm" else "N/A"
 
-        var rssi = "N/A"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            rssi =
-                if (signalStrength.rssi != CellInfo.UNAVAILABLE) "${signalStrength.rssi} dBm" else "N/A"
-        }
+        val rsrqValue = signalStrength.rsrq
+        val rsrq = if (rsrqValue != CellInfo.UNAVAILABLE) "$rsrqValue dB" else "N/A"
+
+        val sinrValue = signalStrength.rssnr
+        val sinr =
+            if (sinrValue != CellInfo.UNAVAILABLE && sinrValue != Integer.MAX_VALUE) "$sinrValue dB" else "N/A"
+
+        val rssiValue =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) signalStrength.rssi else CellInfo.UNAVAILABLE
+        val rssi = if (rssiValue != CellInfo.UNAVAILABLE) "$rssiValue dBm" else "N/A"
 
         runOnUiThread {
-            bandTextView.text = "Network: LTE $band"
+            bandTextView.text = "Network: $band"
             cellsiteIdTextView.text = cellsiteIdText
-            rsrpTextView.text = "RSRP: $rsrp"
-            rsrqTextView.text = "RSRQ: $rsrq"
-            rssiTextView.text =
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "RSSI: $rssi" else "RSSI: N/A (API < 29)"
-            sinrTextView.text = "SINR: $sinr"
+            rsrpTextView.text = "$rsrp"
+            if (rsrpValue != CellInfo.UNAVAILABLE && rsrpValue != Integer.MAX_VALUE) {
+                val rsrpColor = getColorForSignal(rsrpValue, -120, -80)
+                rsrpTextView.setTextColor(rsrpColor)
+            } else {
+                rsrpTextView.setTextColor(Color.BLACK)
+            }
+
+            // Set text and color for RSRQ
+            rsrqTextView.text = "$rsrq"
+            if (rsrqValue != CellInfo.UNAVAILABLE && rsrqValue != Integer.MAX_VALUE) {
+                val rsrqColor = getColorForSignal(rsrqValue, -20, -10)
+                rsrqTextView.setTextColor(rsrqColor)
+            } else {
+                rsrqTextView.setTextColor(Color.BLACK)
+            }
+
+            // Set text and color for SINR
+            sinrTextView.text = "$sinr"
+            if (sinrValue != CellInfo.UNAVAILABLE && sinrValue != Integer.MAX_VALUE) {
+                val sinrColor = getColorForSignal(sinrValue, 0, 20)
+                sinrTextView.setTextColor(sinrColor)
+            } else {
+                sinrTextView.setTextColor(Color.BLACK)
+            }
+
+            // Set text and color for RSSI
+            rssiTextView.text = " $rssi"
+            if (rssiValue != CellInfo.UNAVAILABLE && rssiValue != Integer.MAX_VALUE) {
+                val rssiColor = getColorForSignal(rssiValue, -120, -60)
+                rssiTextView.setTextColor(rssiColor)
+            } else {
+                rssiTextView.setTextColor(Color.BLACK)
+            }
         }
-    }
+        }
+
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun displayNrInfo(cellIdentity: CellIdentityNr, signalStrength: CellSignalStrengthNr) {
@@ -585,6 +612,21 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun getColorForSignal(value: Int, min: Int, max: Int): Int {
+        if (value >= max) {
+            return Color.rgb(0, 128, 0) // Green (Excellent)
+        }
+        if (value <= min) {
+            return Color.rgb(255, 0, 0) // Red (Poor)
+        }
+
+        val normalizedValue = (value - min).toFloat() / (max - min)
+        val red = (255 * (1 - normalizedValue)).toInt()
+        val green = (255 * normalizedValue).toInt()
+
+        return Color.rgb(red, green, 0)
     }
 
     override fun onDestroy() {
