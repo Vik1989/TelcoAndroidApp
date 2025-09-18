@@ -43,6 +43,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var caInfoTextView: TextView
     private var currentSignalStrength: SignalStrength? = null
 
+    private lateinit var networkNameTextView: TextView
+
     companion object {
         private const val PERMISSIONS_REQUEST_CODE = 100
         private const val TEST_FILE_URL = "https://proof.ovh.net/files/10Mb.dat" // Example URL
@@ -62,6 +64,7 @@ class MainActivity : AppCompatActivity() {
         sinrTextView = findViewById(id.sinrTextView)
         testSpeedButton = findViewById(id.testSpeedButton)
         caInfoTextView = findViewById(id.caInfoTextView)
+        networkNameTextView = findViewById(id.networkNameTextView)
         telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
 
         testSpeedButton.setOnClickListener {
@@ -179,6 +182,10 @@ class MainActivity : AppCompatActivity() {
     @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
     private fun updateNetworkInfo() {
         try {
+            val networkName = telephonyManager.networkOperatorName
+            runOnUiThread {
+                networkNameTextView.text = "Network: $networkName"
+            }
             val allCellInfo = telephonyManager.allCellInfo
             if (allCellInfo.isNullOrEmpty()) {
                 runOnUiThread {
@@ -341,7 +348,7 @@ class MainActivity : AppCompatActivity() {
         val rssi = if (rssiValue != CellInfo.UNAVAILABLE) "$rssiValue dBm" else "N/A"
 
         runOnUiThread {
-            bandTextView.text = "Network: $band"
+            bandTextView.text = "Band: $band"
             cellsiteIdTextView.text = cellsiteIdText
             rsrpTextView.text = "$rsrp"
             if (rsrpValue != CellInfo.UNAVAILABLE && rsrpValue != Integer.MAX_VALUE) {
@@ -515,9 +522,9 @@ class MainActivity : AppCompatActivity() {
 
         val caConfig = StringBuilder()
         if (lteCells.size > 1) {
-            caConfig.append("LTE CA Active: (${lteCells.size}CC)\n")
+            caConfig.append("LTE CA Active: (${lteCells.size}CC)\n\n")
         } else {
-            caConfig.append("LTE: 1CC\n")
+            caConfig.append("CA: 1CC (LTE)\n\n")
         }
 
         // Sort cells to ensure primary is first, although it's usually at index 0 or is the first to be "isRegistered"
@@ -527,7 +534,7 @@ class MainActivity : AppCompatActivity() {
             val cellIdentity = cellInfo.cellIdentity as CellIdentityLte
             val signalStrength = cellInfo.cellSignalStrength as CellSignalStrengthLte
 
-            val status = if (cellInfo.isRegistered) "Primary (PCell)" else "Secondary (SCell)"
+            val status = if (cellInfo.isRegistered) "PCC" else "SCC"
             val earfcn = if (cellIdentity.earfcn != CellInfo.UNAVAILABLE) cellIdentity.earfcn.toString() else "N/A"
 
             caConfig.append("$status: EARFCN: $earfcn")
