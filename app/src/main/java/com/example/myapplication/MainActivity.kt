@@ -1,11 +1,13 @@
 package com.example.myapplication
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.telephony.*
+import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import androidx.annotation.RequiresApi
@@ -13,14 +15,20 @@ import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.not
 import com.example.myapplication.R.*
+import data.NetworkSession
+import data.RfAndCaData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.serialization.InternalSerializationApi
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.Executor
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,23 +39,23 @@ class MainActivity : AppCompatActivity() {
 
     private val activityScope = CoroutineScope(Dispatchers.Main)
 
+    private lateinit var networkNameTextView: TextView
     private lateinit var downloadSpeedTextView: TextView
     private lateinit var bandTextView: TextView
     private lateinit var cellsiteIdTextView: TextView
     private lateinit var rsrpTextView: TextView
-    private lateinit var rsrqTextView: TextView // Added for RSRQ
-    private lateinit var rssiTextView: TextView // Added for RSSI
+    private lateinit var rsrqTextView: TextView
+    private lateinit var rssiTextView: TextView
     private lateinit var sinrTextView: TextView
     private lateinit var testSpeedButton: Button
-
     private lateinit var caInfoTextView: TextView
-    private var currentSignalStrength: SignalStrength? = null
 
-    private lateinit var networkNameTextView: TextView
+    private lateinit var mainExecutor: Executor
+
 
     companion object {
         private const val PERMISSIONS_REQUEST_CODE = 100
-        private const val TEST_FILE_URL = "https://proof.ovh.net/files/10Mb.dat" // Example URL
+        private const val TEST_FILE_URL = "https://proof.ovh.net/files/10Mb.dat"
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -55,17 +63,20 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(layout.activity_main)
 
+        networkNameTextView = findViewById(id.networkNameTextView)
         downloadSpeedTextView = findViewById(id.downloadSpeedTextView)
         bandTextView = findViewById(id.bandTextView)
         cellsiteIdTextView = findViewById(id.cellsiteIdTextView)
         rsrpTextView = findViewById(id.rsrpTextView)
-        rsrqTextView = findViewById(id.rsrqTextView) // Initialize RSRQ TextView
-        rssiTextView = findViewById(id.rssiTextView) // Initialize RSSI TextView
+        rsrqTextView = findViewById(id.rsrqTextView)
+        rssiTextView = findViewById(id.rssiTextView)
         sinrTextView = findViewById(id.sinrTextView)
         testSpeedButton = findViewById(id.testSpeedButton)
         caInfoTextView = findViewById(id.caInfoTextView)
-        networkNameTextView = findViewById(id.networkNameTextView)
-        telephonyManager = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
+
+        telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        mainExecutor = ContextCompat.getMainExecutor(this)
+
 
         testSpeedButton.setOnClickListener {
             downloadSpeedTextView.text = "Download Speed: Testing..."
@@ -96,12 +107,11 @@ class MainActivity : AppCompatActivity() {
             )
         } else {
             startNetworkListener()
-            updateNetworkInfo() // Initial update
         }
     }
 
-    @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
     @RequiresApi(Build.VERSION_CODES.Q)
+    @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,
@@ -111,32 +121,22 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == PERMISSIONS_REQUEST_CODE) {
             if ((grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED })) {
                 startNetworkListener()
-                updateNetworkInfo() // Initial update
             } else {
-                // Handle permission denial, e.g., show a message to the user
                 bandTextView.text = "Permissions denied"
-                // You might want to disable functionality or explain why permissions are needed
             }
         }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
+    @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
     private fun startNetworkListener() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            telephonyCallback = object : TelephonyCallback(), TelephonyCallback.CellInfoListener,
-                TelephonyCallback.SignalStrengthsListener { // Added SignalStrengthsListener for more frequent updates
+            telephonyCallback = object : TelephonyCallback(), TelephonyCallback.CellInfoListener {
                 @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
                 override fun onCellInfoChanged(cellInfo: MutableList<CellInfo>) {
                     updateNetworkInfo()
                 }
-
-                @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
-                override fun onSignalStrengthsChanged(signalStrengths: SignalStrength) {
-                    //super.onSignalStrengthsChanged(signalStrengths)
-                    updateNetworkInfo()
-                }
             }
-            // Register for both CellInfo and SignalStrength changes
             telephonyManager.registerTelephonyCallback(
                 mainExecutor,
                 telephonyCallback as TelephonyCallback
@@ -145,48 +145,33 @@ class MainActivity : AppCompatActivity() {
         } else {
             @Suppress("Deprecation")
             phoneStateListener = object : PhoneStateListener() {
-                // For older APIs, onCellInfoChanged might not be called as frequently
-                // or might not be the primary way to get signal strength updates for all metrics.
-                // onSignalStrengthsChanged is often more reliable for continuous signal updates.
                 @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
                 override fun onCellInfoChanged(cellInfo: MutableList<CellInfo>?) {
                     super.onCellInfoChanged(cellInfo)
                     updateNetworkInfo()
                 }
-
-                @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
-                @Deprecated("Deprecated in Java")
-                override fun onSignalStrengthsChanged(signalStrength: SignalStrength?) {
-                    super.onSignalStrengthsChanged(signalStrength)
-                    currentSignalStrength = signalStrength
-                    updateNetworkInfo() // Update on signal strength change too
-                }
             }
             @Suppress("Deprecation")
             telephonyManager.listen(
                 phoneStateListener,
-                PhoneStateListener.LISTEN_CELL_INFO or PhoneStateListener.LISTEN_SIGNAL_STRENGTHS
-            ) // Listen for both
+                PhoneStateListener.LISTEN_CELL_INFO
+            )
         }
-        // Initial call to display data as soon as listener is set up (if permissions are already granted)
-        if (ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            updateNetworkInfo()
-        }
+        updateNetworkInfo()
     }
+
 
     @RequiresApi(Build.VERSION_CODES.Q)
     @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
     private fun updateNetworkInfo() {
         try {
+            val allCellInfo = telephonyManager.allCellInfo
+
             val networkName = telephonyManager.networkOperatorName
             runOnUiThread {
                 networkNameTextView.text = "Network: $networkName"
             }
-            val allCellInfo = telephonyManager.allCellInfo
+
             if (allCellInfo.isNullOrEmpty()) {
                 runOnUiThread {
                     bandTextView.text = "Network Band: N/A (No cell info)"
@@ -200,30 +185,24 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
-            val registeredCells = allCellInfo.filter { it.isRegistered }
+            val registeredCellInfo = allCellInfo.firstOrNull { it.isRegistered }
 
-            if (registeredCells.isNotEmpty()) {
-                val primaryCell = registeredCells.first()
-                when (primaryCell) {
+            if (registeredCellInfo != null) {
+                when (registeredCellInfo) {
                     is CellInfoLte -> {
-                        val cellIdentity = primaryCell.cellIdentity as CellIdentityLte
-                        val signalStrength = primaryCell.cellSignalStrength as CellSignalStrengthLte
+                        val cellIdentity = registeredCellInfo.cellIdentity as CellIdentityLte
+                        val signalStrength = registeredCellInfo.cellSignalStrength as CellSignalStrengthLte
                         displayLteInfo(cellIdentity, signalStrength)
+                        displayCaInfo(allCellInfo)
                     }
                     is CellInfoNr -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            val cellIdentity = primaryCell.cellIdentity as CellIdentityNr
-                            val signalStrength = primaryCell.cellSignalStrength as CellSignalStrengthNr
-                            displayNrInfo(cellIdentity, signalStrength)
-                        }
+                        val cellIdentity = registeredCellInfo.cellIdentity as CellIdentityNr
+                        val signalStrength = registeredCellInfo.cellSignalStrength as CellSignalStrengthNr
+                        displayNrInfo(cellIdentity, signalStrength)
+                        displayCaInfo(allCellInfo)
                     }
-                    is CellInfoGsm -> {
-                        val cellIdentity = primaryCell.cellIdentity as CellIdentityGsm
-                        val signalStrength = primaryCell.cellSignalStrength as CellSignalStrengthGsm
-                        displayGsmInfo(cellIdentity, signalStrength)
-                    }
+                    else -> displayNoSpecificCellTypeInfo()
                 }
-                displayCaInfo(registeredCells)
             } else {
                 displayNoSpecificCellTypeInfo()
             }
@@ -233,7 +212,7 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (e: Exception) {
             runOnUiThread {
-                bandTextView.text = "Error updating info"
+                bandTextView.text = "Error updating info: ${e.message}"
             }
         }
     }
@@ -246,92 +225,40 @@ class MainActivity : AppCompatActivity() {
             rsrqTextView.text = "RSRQ: N/A"
             rssiTextView.text = "RSSI: N/A"
             sinrTextView.text = "SINR: N/A"
+            caInfoTextView.text = "CA: N/A"
         }
     }
-
 
     private fun displayLteInfo(
         cellIdentity: CellIdentityLte,
         signalStrength: CellSignalStrengthLte
     ) {
-        val band = when (val earfcn = cellIdentity.earfcn) {
+        val earfcn = cellIdentity.earfcn
+        val band = when (earfcn) {
             in 0..599 -> "LTE Band 1 (2100MHz)"
             in 600..1199 -> "LTE Band 2 (1900MHz)"
             in 1200..1949 -> "LTE Band 3 (1800MHz)"
             in 1950..2399 -> "LTE Band 4 (1700MHz AWS-1)"
             in 2400..2649 -> "LTE Band 5 (850MHz)"
-            // No Band 6 defined for LTE FDD
             in 2750..3449 -> "LTE Band 7 (2600MHz)"
             in 3450..3799 -> "LTE Band 8 (900MHz)"
-            // No Band 9 defined for LTE FDD
-            // No Band 10 defined for LTE FDD
-            in 4750..4949 -> "LTE Band 11 (1500MHz PDC)" // Check if this is relevant for your region
             in 5010..5179 -> "LTE Band 12 (700MHz ac)"
             in 5180..5279 -> "LTE Band 13 (700MHz c)"
             in 5280..5379 -> "LTE Band 14 (700MHz FirstNet)"
-            // No Band 15, 16
             in 5730..5849 -> "LTE Band 17 (700MHz b)"
-            in 5850..5999 -> "LTE Band 18 (800MHz Lower)" // Japan
-            in 6000..6149 -> "LTE Band 19 (800MHz Upper)" // Japan
+            in 5850..5999 -> "LTE Band 18 (800MHz Lower)"
+            in 6000..6149 -> "LTE Band 19 (800MHz Upper)"
             in 6150..6449 -> "LTE Band 20 (800MHz DD)"
-            in 6450..6599 -> "LTE Band 21 (1500MHz Upper)" // Japan
-            // No Band 22
-            // No Band 23
-            in 7700..8039 -> "LTE Band 24 (1600MHz L-band)" // US
-            in 8040..8689 -> "LTE Band 25 (1900MHz Extended PCS)"
-            in 8690..9039 -> "LTE Band 26 (850MHz Extended)"
-            // No Band 27
             in 9210..9659 -> "LTE Band 28 (700MHz APT)"
-            in 9660..9769 -> "LTE Band 29 (700MHz SDL)" // Supplemental Downlink
-            in 9770..9869 -> "LTE Band 30 (2300MHz WCS)"
-            in 9870..9919 -> "LTE Band 31 (450MHz)"
-            // No Band 32 (SDL)
-            // TDD Bands
-            in 36000..36199 -> "LTE Band 33 (1900MHz TDD)"
-            in 36200..36349 -> "LTE Band 34 (2000MHz TDD)"
-            in 36350..36949 -> "LTE Band 35 (1900MHz PCS TDD)"
-            in 36950..37549 -> "LTE Band 36 (1900MHz PCS TDD)"
-            in 37550..37749 -> "LTE Band 37 (1900MHz PCS TDD)"
-            in 37750..38249 -> "LTE Band 38 (2600MHz TDD)"
-            in 38250..38649 -> "LTE Band 39 (1900MHz TDD)"
             in 38650..39649 -> "LTE Band 40 (2300MHz TDD)"
             in 39650..41589 -> "LTE Band 41 (2500MHz TDD BRS/EBS)"
-            in 41590..43589 -> "LTE Band 42 (3500MHz TDD)"
-            in 43590..45589 -> "LTE Band 43 (3700MHz TDD)"
-            in 45590..46589 -> "LTE Band 44 (700MHz APT TDD)" // aka Band 72
-            in 46590..46789 -> "LTE Band 45 (1500MHz L-band TDD)"
-            in 46790..54539 -> "LTE Band 46 (5200MHz unlicensed TDD)" // LAA
-            in 54540..55239 -> "LTE Band 47 (5900MHz V2X)"
-            in 55240..56739 -> "LTE Band 48 (3550-3700MHz CBRS TDD)"
-            in 56740..58239 -> "LTE Band 49 (3500MHz TDD)" // China
-            in 58240..59139 -> "LTE Band 50 (1500MHz L-band TDD)" // Europe
-            in 59140..59939 -> "LTE Band 51 (1500MHz L-band TDD)" // Europe SDL
-            in 59940..60139 -> "LTE Band 52 (3300-3400MHz TDD)" // China
-            in 60140..61149 -> "LTE Band 53 (2483.5-2495MHz S-Band)" // Globalstar/Qualcomm
-            // Common Higher Bands (often region/operator specific, check 3GPP for full list)
-            in 65536..66435 -> "LTE Band 65 (2100MHz Extended FDD)"
-            in 66436..67335 -> "LTE Band 66 (1700MHz Extended AWS FDD)"
-            in 67336..67835 -> "LTE Band 67 (700MHz SDL)"
-            in 67836..68335 -> "LTE Band 68 (700MHz FDD)"
-            in 68336..68585 -> "LTE Band 69 (2600MHz SDL)"
-            in 68586..68935 -> "LTE Band 70 (1700/2000MHz AWS-4 FDD)"
-            in 68936..69465 -> "LTE Band 71 (600MHz FDD)"
-            // Band 72 is an alias for Band 44
-            in 69886..70335 -> "LTE Band 73 (450MHz FDD)" // Not widely used
-            in 70336..70785 -> "LTE Band 74 (1500MHz L-Band FDD)"
-            in 70786..71335 -> "LTE Band 75 (1500MHz L-Band SDL)"
-            in 71336..71585 -> "LTE Band 76 (1500MHz L-Band SDL)"
-            // Add more as needed, e.g. from 3GPP TS 36.101, Annex E
-            else -> if (earfcn != CellInfo.UNAVAILABLE) "Unknown LTE Band (EARFCN: $earfcn)" else "Unknown LTE Band"
+            else -> "Unknown LTE Band (EARFCN: $earfcn)"
         }
 
-        val pci =
-            if (cellIdentity.pci != CellInfo.UNAVAILABLE) cellIdentity.pci.toString() else "N/A"
-        val tac =
-            if (cellIdentity.tac != CellInfo.UNAVAILABLE) cellIdentity.tac.toString() else "N/A"
+        val pci = if (cellIdentity.pci != CellInfo.UNAVAILABLE) cellIdentity.pci.toString() else "N/A"
+        val tac = if (cellIdentity.tac != CellInfo.UNAVAILABLE) cellIdentity.tac.toString() else "N/A"
         val ci = if (cellIdentity.ci != CellInfo.UNAVAILABLE) cellIdentity.ci.toString() else "N/A"
         val cellsiteIdText = "PCI: $pci, TAC: $tac, CI: $ci"
-
 
         val rsrpValue = signalStrength.rsrp
         val rsrp = if (rsrpValue != CellInfo.UNAVAILABLE) "$rsrpValue dBm" else "N/A"
@@ -348,9 +275,10 @@ class MainActivity : AppCompatActivity() {
         val rssi = if (rssiValue != CellInfo.UNAVAILABLE) "$rssiValue dBm" else "N/A"
 
         runOnUiThread {
-            bandTextView.text = "Band: $band"
+            bandTextView.text = "Network: LTE ($band)"
             cellsiteIdTextView.text = cellsiteIdText
-            rsrpTextView.text = "$rsrp"
+
+            rsrpTextView.text = "RSRP: $rsrp"
             if (rsrpValue != CellInfo.UNAVAILABLE && rsrpValue != Integer.MAX_VALUE) {
                 val rsrpColor = getColorForSignal(rsrpValue, -120, -80)
                 rsrpTextView.setTextColor(rsrpColor)
@@ -358,8 +286,7 @@ class MainActivity : AppCompatActivity() {
                 rsrpTextView.setTextColor(Color.BLACK)
             }
 
-            // Set text and color for RSRQ
-            rsrqTextView.text = "$rsrq"
+            rsrqTextView.text = "RSRQ: $rsrq"
             if (rsrqValue != CellInfo.UNAVAILABLE && rsrqValue != Integer.MAX_VALUE) {
                 val rsrqColor = getColorForSignal(rsrqValue, -20, -10)
                 rsrqTextView.setTextColor(rsrqColor)
@@ -367,8 +294,7 @@ class MainActivity : AppCompatActivity() {
                 rsrqTextView.setTextColor(Color.BLACK)
             }
 
-            // Set text and color for SINR
-            sinrTextView.text = "$sinr"
+            sinrTextView.text = "SINR: $sinr"
             if (sinrValue != CellInfo.UNAVAILABLE && sinrValue != Integer.MAX_VALUE) {
                 val sinrColor = getColorForSignal(sinrValue, 0, 20)
                 sinrTextView.setTextColor(sinrColor)
@@ -376,8 +302,7 @@ class MainActivity : AppCompatActivity() {
                 sinrTextView.setTextColor(Color.BLACK)
             }
 
-            // Set text and color for RSSI
-            rssiTextView.text = " $rssi"
+            rssiTextView.text = "RSSI: $rssi"
             if (rssiValue != CellInfo.UNAVAILABLE && rssiValue != Integer.MAX_VALUE) {
                 val rssiColor = getColorForSignal(rssiValue, -120, -60)
                 rssiTextView.setTextColor(rssiColor)
@@ -385,182 +310,136 @@ class MainActivity : AppCompatActivity() {
                 rssiTextView.setTextColor(Color.BLACK)
             }
         }
-        }
-
+    }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun displayNrInfo(cellIdentity: CellIdentityNr, signalStrength: CellSignalStrengthNr) {
-        val nrarfcn =
-            if (cellIdentity.nrarfcn != CellInfo.UNAVAILABLE) cellIdentity.nrarfcn.toString() else "N/A"
-        // Band determination for NR is more complex as NRARFCNs are global and don't directly map to bands like EARFCNs.
-        // You'd typically need a lookup table or logic based on frequency ranges if you want to display the NR band string (e.g., "n78").
-        // For now, just showing ARFCN.
-        val band = "NR ARFCN: $nrarfcn" // Simplified for now
+    private fun displayNrInfo(
+        cellIdentity: CellIdentityNr,
+        signalStrength: CellSignalStrengthNr
+    ) {
+        val nrarfcn = if (cellIdentity.nrarfcn != CellInfo.UNAVAILABLE) cellIdentity.nrarfcn.toString() else "N/A"
+        val band = "NR ARFCN: $nrarfcn"
 
-        val pci =
-            if (cellIdentity.pci != CellInfo.UNAVAILABLE) cellIdentity.pci.toString() else "N/A"
-        val tac =
-            if (cellIdentity.tac != CellInfo.UNAVAILABLE) cellIdentity.tac.toString() else "N/A"
-        val nci =
-            if (cellIdentity.nci != CellInfo.UNAVAILABLE_LONG) cellIdentity.nci.toString() else "N/A"
+        val pci = if (cellIdentity.pci != CellInfo.UNAVAILABLE) cellIdentity.pci.toString() else "N/A"
+        val tac = if (cellIdentity.tac != CellInfo.UNAVAILABLE) cellIdentity.tac.toString() else "N/A"
+        val nci = if (cellIdentity.nci != CellInfo.UNAVAILABLE_LONG) cellIdentity.nci.toString() else "N/A"
         val cellsiteIdText = "PCI: $pci, TAC: $tac, NCI: $nci"
 
-        val ssRsrp =
-            if (signalStrength.ssRsrp != CellInfo.UNAVAILABLE) "${signalStrength.ssRsrp} dBm" else "N/A"
-        val ssRsrq =
-            if (signalStrength.ssRsrq != CellInfo.UNAVAILABLE) "${signalStrength.ssRsrq} dB" else "N/A"
+        val ssRsrpValue = signalStrength.ssRsrp
+        val ssRsrp = if (ssRsrpValue != CellInfo.UNAVAILABLE) "$ssRsrpValue dBm" else "N/A"
+
+        val ssRsrqValue = signalStrength.ssRsrq
+        val ssRsrq = if (ssRsrqValue != CellInfo.UNAVAILABLE) "$ssRsrqValue dB" else "N/A"
+
+        val ssSinrValue = signalStrength.ssSinr
         val ssSinr =
-            if (signalStrength.ssSinr != CellInfo.UNAVAILABLE && signalStrength.ssSinr != Integer.MAX_VALUE) {
-                "${signalStrength.ssSinr} dB"
-            } else {
-                "N/A"
-            }
-
-        // CSI values are more for beamforming and detailed channel state, might be less commonly available for basic display
-        val csiRsrp =
-            if (signalStrength.csiRsrp != CellInfo.UNAVAILABLE) "${signalStrength.csiRsrp} dBm" else "N/A (CSI)"
-        val csiRsrq =
-            if (signalStrength.csiRsrq != CellInfo.UNAVAILABLE) "${signalStrength.csiRsrq} dB" else "N/A (CSI)"
-        val csiSinr =
-            if (signalStrength.csiSinr != CellInfo.UNAVAILABLE && signalStrength.csiSinr != Integer.MAX_VALUE) {
-                "${signalStrength.csiSinr} dB"
-            } else {
-                "N/A (CSI)"
-            }
-
+            if (ssSinrValue != CellInfo.UNAVAILABLE && ssSinrValue != Integer.MAX_VALUE) "$ssSinrValue dB" else "N/A"
 
         runOnUiThread {
             bandTextView.text = "Network: 5G NR ($band)"
             cellsiteIdTextView.text = cellsiteIdText
-            rsrpTextView.text = "SS-RSRP: $ssRsrp" // For NR, SS-RSRP is primary
+
+            rsrpTextView.text = "SS-RSRP: $ssRsrp"
+            if (ssRsrpValue != CellInfo.UNAVAILABLE && ssRsrpValue != Integer.MAX_VALUE) {
+                val rsrpColor = getColorForSignal(ssRsrpValue, -120, -80)
+                rsrpTextView.setTextColor(rsrpColor)
+            } else {
+                rsrpTextView.setTextColor(Color.BLACK)
+            }
+
             rsrqTextView.text = "SS-RSRQ: $ssRsrq"
-            rssiTextView.text =
-                "RSSI: N/A (NR specific)" // RSSI is less defined for NR in the same way as LTE
+            if (ssRsrqValue != CellInfo.UNAVAILABLE && ssRsrqValue != Integer.MAX_VALUE) {
+                val rsrqColor = getColorForSignal(ssRsrqValue, -20, -10)
+                rsrqTextView.setTextColor(rsrqColor)
+            } else {
+                rsrqTextView.setTextColor(Color.BLACK)
+            }
+
             sinrTextView.text = "SS-SINR: $ssSinr"
-            // Optionally display CSI values if needed, perhaps in more TextViews or a details section
-            // e.g., findViewById<TextView>(R.id.csiRsrpTextView).text = "CSI-RSRP: $csiRsrp"
-        }
-    }
+            if (ssSinrValue != CellInfo.UNAVAILABLE && ssSinrValue != Integer.MAX_VALUE) {
+                val sinrColor = getColorForSignal(ssSinrValue, 0, 20)
+                sinrTextView.setTextColor(sinrColor)
+            } else {
+                sinrTextView.setTextColor(Color.BLACK)
+            }
 
-    // Placeholder for GSM Info
-    @RequiresPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-    private fun displayGsmInfo(
-        cellIdentity: CellIdentityGsm,
-        signalStrength: CellSignalStrengthGsm
-    ) {
-        val lac =
-            if (cellIdentity.lac != CellInfo.UNAVAILABLE) cellIdentity.lac.toString() else "N/A"
-        val cid =
-            if (cellIdentity.cid != CellInfo.UNAVAILABLE) cellIdentity.cid.toString() else "N/A"
-        val arfcn =
-            if (cellIdentity.arfcn != CellInfo.UNAVAILABLE) cellIdentity.arfcn.toString() else "N/A"
-        // mcc and mnc can be obtained from cellIdentity.mccString and cellIdentity.mncString if needed
-
-        val signalStrengthDb =
-            if (signalStrength.dbm != CellInfo.UNAVAILABLE) "${signalStrength.dbm} dBm" else "N/A"
-        // GSM bit error rate, timing advance could also be accessed via signalStrength if needed.
-
-        runOnUiThread {
-            bandTextView.text = "Network: GSM (ARFCN: $arfcn)"
-            cellsiteIdTextView.text = "LAC: $lac, CID: $cid"
-            rsrpTextView.text = "Signal: $signalStrengthDb" // GSM uses general signal strength
-            rsrqTextView.text = "RSRQ: N/A (GSM)"
-            rssiTextView.text = "RSSI: $signalStrengthDb" // Dbm is often used as RSSI for GSM
-            sinrTextView.text = "SINR: N/A (GSM)"
-        }
-    }
-
-    // Placeholder for WCDMA (UMTS) Info
-    @RequiresApi(Build.VERSION_CODES.R)
-    @RequiresPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-    private fun displayWcdmaInfo(
-        cellIdentity: CellIdentityWcdma,
-        signalStrength: CellSignalStrengthWcdma
-    ) {
-        val lac =
-            if (cellIdentity.lac != CellInfo.UNAVAILABLE) cellIdentity.lac.toString() else "N/A"
-        val cid =
-            if (cellIdentity.cid != CellInfo.UNAVAILABLE) cellIdentity.cid.toString() else "N/A"
-        val uarfcn =
-            if (cellIdentity.uarfcn != CellInfo.UNAVAILABLE) cellIdentity.uarfcn.toString() else "N/A"
-        val psc =
-            if (cellIdentity.psc != CellInfo.UNAVAILABLE) cellIdentity.psc.toString() else "N/A"
-
-        val signalStrengthDb =
-            if (signalStrength.dbm != CellInfo.UNAVAILABLE) "${signalStrength.dbm} dBm" else "N/A"
-        // WCDMA also has Ec/No (EcNo) which is like SINR. signalStrength.ecNo (requires API 29 for getEcNo, older is getEcNo())
-
-        var ecNo = "N/A"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (signalStrength.ecNo != CellInfo.UNAVAILABLE) ecNo =
-                "${signalStrength.ecNo / 10.0} dB" // Often in tenths of dB
-        } else {
-            // No direct getEcNo before Q in CellSignalStrengthWcdma, dbm is primary
-        }
-
-
-        runOnUiThread {
-            bandTextView.text = "Network: WCDMA (UARFCN: $uarfcn)"
-            cellsiteIdTextView.text = "LAC: $lac, CID: $cid, PSC: $psc"
-            rsrpTextView.text = "RSCP: $signalStrengthDb" // RSCP is often reported as dbm
-            rsrqTextView.text = "Ec/No: $ecNo" // Ec/No is a quality measure
-            rssiTextView.text = "RSSI: $signalStrengthDb"
-            sinrTextView.text = "Ec/No: $ecNo" // Using Ec/No for SINR field for WCDMA
+            rssiTextView.text = "RSSI: N/A"
+            rssiTextView.setTextColor(Color.BLACK)
         }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun displayCaInfo(allCellInfo: List<CellInfo>) {
-        val lteCells = allCellInfo.filterIsInstance<CellInfoLte>()
-
-        if (lteCells.isEmpty()) {
-            runOnUiThread {
-                caInfoTextView.text = "CA: No LTE Cells Found"
-            }
-            return
-        }
+        val lteCells = allCellInfo.filterIsInstance<CellInfoLte>().filter { it.isRegistered }
+        val nrCells = allCellInfo.filterIsInstance<CellInfoNr>().filter { it.isRegistered }
 
         val caConfig = StringBuilder()
-        if (lteCells.size > 1) {
-            caConfig.append("LTE CA Active: (${lteCells.size}CC)\n\n")
-        } else {
-            caConfig.append("CA: 1CC (LTE)\n\n")
-        }
 
-        // Sort cells to ensure primary is first, although it's usually at index 0 or is the first to be "isRegistered"
-        val sortedLteCells = lteCells.sortedByDescending { it.isRegistered }
-
-        sortedLteCells.forEachIndexed { index, cellInfo ->
-            val cellIdentity = cellInfo.cellIdentity as CellIdentityLte
-            val signalStrength = cellInfo.cellSignalStrength as CellSignalStrengthLte
-
-            val status = if (cellInfo.isRegistered) "PCC" else "SCC"
-            val earfcn = if (cellIdentity.earfcn != CellInfo.UNAVAILABLE) cellIdentity.earfcn.toString() else "N/A"
-
-            caConfig.append("$status: EARFCN: $earfcn")
-
-            // The getCellBandwidths() method is the key to getting bandwidths
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) { // API 28
-                try {
-                    // This is a direct check on the CellInfo object for bandwidth
-                    val bandwidth = cellIdentity.bandwidth
-                    if (bandwidth != CellInfo.UNAVAILABLE) {
-                        caConfig.append(", BW: ${bandwidth / 1000}MHz")
-                    }
-                } catch (e: Exception) {
-                    // Handle exceptions on specific devices
-                }
+        if (nrCells.isNotEmpty()) {
+            caConfig.append("5G NR Active")
+            if (lteCells.isNotEmpty()) {
+                caConfig.append(" (NSA)\n")
+            } else {
+                caConfig.append(" (SA)\n")
             }
 
-            // Add signal strength details for each carrier
-            val rsrp = if (signalStrength.rsrp != CellInfo.UNAVAILABLE) "RSRP:${signalStrength.rsrp}dBm" else "RSRP:N/A"
-            caConfig.append(", $rsrp\n")
+            if (nrCells.size > 1) {
+                caConfig.append("NR CA: (${nrCells.size} CC)\n")
+            } else {
+                caConfig.append("NR: 1CC\n")
+            }
+
+            nrCells.forEachIndexed { index, cell ->
+                val cellIdentity = cell.cellIdentity as CellIdentityNr
+                val signalStrength = cell.cellSignalStrength as CellSignalStrengthNr
+                val status = if (index == 0) "PCell" else "SCell"
+                val nrarfcn = cellIdentity.nrarfcn
+                val ssRsrp = signalStrength.ssRsrp
+
+                caConfig.append("- $status: NR-ARFCN $nrarfcn, SS-RSRP $ssRsrp dBm\n")
+            }
         }
 
-        runOnUiThread {
-            caInfoTextView.text = caConfig.toString()
+        if (lteCells.isNotEmpty()) {
+            if (caConfig.isNotEmpty()) {
+                caConfig.append("\n")
+            }
+
+            if (lteCells.size > 1) {
+                caConfig.append("LTE CA: (${lteCells.size} CC)\n")
+            } else {
+                caConfig.append("LTE: 1CC\n")
+            }
+
+            val pCell = lteCells.firstOrNull { it.isRegistered }
+            if (pCell != null) {
+                val pCellIdentity = pCell.cellIdentity as CellIdentityLte
+                val pCellSignalStrength = pCell.cellSignalStrength as CellSignalStrengthLte
+                val pCellBand = "LTE Band ${pCellIdentity.bandwidth / 1000}MHz"
+                val pCellRsrp = pCellSignalStrength.rsrp
+
+                caConfig.append("- PCell: $pCellBand, RSRP: $pCellRsrp dBm\n")
+
+                val sCells = lteCells.filter { it != pCell && it.isRegistered }
+                sCells.forEachIndexed { index, sCell ->
+                    val sCellIdentity = sCell.cellIdentity as CellIdentityLte
+                    val sCellSignalStrength = sCell.cellSignalStrength as CellSignalStrengthLte
+                    val sCellBand = "LTE Band ${sCellIdentity.bandwidth / 1000}MHz"
+                    val sCellRsrp = sCellSignalStrength.rsrp
+                    caConfig.append("- SCell ${index + 1}: $sCellBand, RSRP: $sCellRsrp dBm\n")
+                }
+            }
+        }
+
+        if (caConfig.isEmpty()) {
+            caInfoTextView.text = "CA: N/A"
+        } else {
+            caInfoTextView.text = caConfig.toString().trim()
         }
     }
+
+
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun runSpeedTest() {
         downloadSpeedTextView.text = "Download Speed: Testing..."
 
@@ -568,43 +447,50 @@ class MainActivity : AppCompatActivity() {
             try {
                 val url = URL(TEST_FILE_URL)
                 val connection = url.openConnection() as HttpURLConnection
-                connection.connectTimeout = 10000 // 10 seconds
-                connection.readTimeout = 15000 // 15 seconds
+                connection.connectTimeout = 10000
+                connection.readTimeout = 15000
                 connection.connect()
 
                 if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                     launch(Dispatchers.Main) {
-                        downloadSpeedTextView.text =
-                            "Download Speed: Failed (Server Error ${connection.responseCode})"
+                        downloadSpeedTextView.text = "Download Speed: Failed (Server Error ${connection.responseCode})"
                     }
                     return@launch
                 }
 
                 val startTime = System.currentTimeMillis()
                 val inputStream = connection.inputStream
-                val buffer = ByteArray(8192) // Increased buffer size
+                val buffer = ByteArray(8192)
                 var downloadedBytes = 0L
                 var bytesRead: Int
 
                 while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                     downloadedBytes += bytesRead
-                    // Optional: Update progress during download
-                     val progress = (downloadedBytes * 100 / (100 * 1024 * 1024)).toInt() // Assuming 100MB file
-                    launch(Dispatchers.Main) {
-                        downloadSpeedTextView.text = "Download Speed: Testing... $progress%"
-                     }
                 }
                 inputStream.close()
                 val endTime = System.currentTimeMillis()
-                val duration = (endTime - startTime).toDouble() / 1000.0 // Ensure double division
+                val duration = (endTime - startTime).toDouble() / 1000.0
                 connection.disconnect()
 
                 if (duration > 0) {
-                    val downloadSpeedMbps =
-                        (downloadedBytes * 8.0 / (duration * 1000000.0)) // Use double for precision
+                    val downloadSpeedMbps = (downloadedBytes * 8.0 / (duration * 1000000.0))
                     launch(Dispatchers.Main) {
-                        downloadSpeedTextView.text =
-                            "Download Speed: %.2f Mbps".format(downloadSpeedMbps)
+                        downloadSpeedTextView.text = "Download Speed: %.2f Mbps".format(downloadSpeedMbps)
+
+                        // FIX: Explicit runtime permission check and qualified 'this' reference
+                        if (ActivityCompat.checkSelfPermission(
+                                this@MainActivity,
+                                Manifest.permission.ACCESS_FINE_LOCATION
+                            ) != PackageManager.PERMISSION_GRANTED || ActivityCompat.checkSelfPermission(
+                                this@MainActivity,
+                                Manifest.permission.READ_PHONE_STATE
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            Log.e("SpeedTest", "Permissions revoked, cannot save data.")
+                            return@launch
+                        }
+
+                        saveCapturedData(downloadSpeedMbps)
                     }
                 } else {
                     launch(Dispatchers.Main) {
@@ -612,10 +498,9 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: Exception) {
-                // Log.e("SpeedTest", "Error during speed test: ${e.message}", e)
+                Log.e("SpeedTest", "Error during speed test: ${e.message}", e)
                 launch(Dispatchers.Main) {
-                    downloadSpeedTextView.text =
-                        "Download Speed: Failed (${e.javaClass.simpleName})"
+                    downloadSpeedTextView.text = "Download Speed: Failed (${e.javaClass.simpleName})"
                 }
             }
         }
@@ -623,22 +508,151 @@ class MainActivity : AppCompatActivity() {
 
     private fun getColorForSignal(value: Int, min: Int, max: Int): Int {
         if (value >= max) {
-            return Color.rgb(0, 128, 0) // Green (Excellent)
+            return Color.rgb(0, 128, 0)
         }
         if (value <= min) {
-            return Color.rgb(255, 0, 0) // Red (Poor)
+            return Color.rgb(255, 0, 0)
         }
-
         val normalizedValue = (value - min).toFloat() / (max - min)
         val red = (255 * (1 - normalizedValue)).toInt()
         val green = (255 * normalizedValue).toInt()
-
         return Color.rgb(red, green, 0)
+    }
+
+    @OptIn(InternalSerializationApi::class)
+    @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun saveCapturedData(downloadSpeedMbps: Double) {
+        // FIX: Explicit runtime check is already done in runSpeedTest, but keeping this
+        // try-catch block for absolute safety against concurrent permission changes.
+        try {
+            val allCellInfo = telephonyManager.allCellInfo
+            val carriers = captureNetworkData(allCellInfo)
+
+            val session = NetworkSession(
+                timestamp = System.currentTimeMillis(),
+                networkName = telephonyManager.networkOperatorName,
+                downloadSpeedMbps = downloadSpeedMbps,
+                carriers = carriers
+            )
+
+            val jsonString = Json.encodeToString(session)
+            Log.d("JSON_DATA", jsonString)
+            saveJsonToInternalStorage(applicationContext, jsonString)
+        } catch (e: SecurityException) {
+            Log.e("JSON_DATA", "SecurityException during data capture: ${e.message}")
+        } catch (e: Exception) {
+            Log.e("JSON_DATA", "Error during data capture: ${e.message}")
+        }
+    }
+
+    @OptIn(InternalSerializationApi::class)
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun captureNetworkData(allCellInfo: List<CellInfo>): List<RfAndCaData> {
+        val carriers = mutableListOf<RfAndCaData>()
+
+        // LTE: Filter for both registered (PCell) and unregistered (SCells) to get CA info
+        val servingLteCells = allCellInfo.filterIsInstance<CellInfoLte>()
+
+        val pCellLte = servingLteCells.firstOrNull { it.isRegistered }
+
+        // 1. Process LTE PCell
+        if (pCellLte != null) {
+            val identity = pCellLte.cellIdentity as CellIdentityLte
+            val signal = pCellLte.cellSignalStrength as CellSignalStrengthLte
+
+            carriers.add(RfAndCaData(
+                type = "LTE",
+                status = "PCell",
+                band = "LTE Band ${identity.bandwidth / 1000}MHz",
+                pci = if (identity.pci != CellInfo.UNAVAILABLE) identity.pci else null,
+                tac = if (identity.tac != CellInfo.UNAVAILABLE) identity.tac else null,
+                ci = if (identity.ci != CellInfo.UNAVAILABLE) identity.ci.toLong() else null,
+                rsrp = if (signal.rsrp != CellInfo.UNAVAILABLE) signal.rsrp else null,
+                rsrq = if (signal.rsrq != CellInfo.UNAVAILABLE) signal.rsrq else null,
+                sinr = if (signal.rssnr != CellInfo.UNAVAILABLE) signal.rssnr else null,
+                rssi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && signal.rssi != CellInfo.UNAVAILABLE) signal.rssi else null
+            ))
+
+            // 2. Process LTE SCells (filter out PCell, rely on modem reporting SCells)
+            val sCellsLte = servingLteCells.filter { it != pCellLte }
+            sCellsLte.forEach { sCell ->
+                val sIdentity = sCell.cellIdentity as CellIdentityLte
+                val sSignal = sCell.cellSignalStrength as CellSignalStrengthLte
+                carriers.add(RfAndCaData(
+                    type = "LTE",
+                    status = "SCell",
+                    band = "LTE Band ${sIdentity.bandwidth / 1000}MHz",
+                    pci = if (sIdentity.pci != CellInfo.UNAVAILABLE) sIdentity.pci else null,
+                    tac = if (sIdentity.tac != CellInfo.UNAVAILABLE) sIdentity.tac else null,
+                    ci = if (sIdentity.ci != CellInfo.UNAVAILABLE) sIdentity.ci.toLong() else null,
+                    rsrp = if (sSignal.rsrp != CellInfo.UNAVAILABLE) sSignal.rsrp else null,
+                    rsrq = if (sSignal.rsrq != CellInfo.UNAVAILABLE) sSignal.rsrq else null,
+                    sinr = if (sSignal.rssnr != CellInfo.UNAVAILABLE) sSignal.rssnr else null,
+                    rssi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && sSignal.rssi != CellInfo.UNAVAILABLE) sSignal.rssi else null
+                ))
+            }
+        }
+
+        // NR: Filter for all CellInfoNr to capture CA (PCell/Anchor and SCells)
+        val servingNrCells = allCellInfo.filterIsInstance<CellInfoNr>()
+        servingNrCells.forEachIndexed { index, cell ->
+            val identity = cell.cellIdentity as CellIdentityNr
+            val signal = cell.cellSignalStrength as CellSignalStrengthNr
+
+            // Assign status based on registration or index, but note that CA SCells are often not "registered"
+            val status = if (cell.isRegistered) "PCell" else "SCell"
+
+            carriers.add(RfAndCaData(
+                type = "NR",
+                status = status,
+                band = "NR-ARFCN ${identity.nrarfcn}",
+                pci = if (identity.pci != CellInfo.UNAVAILABLE) identity.pci else null,
+                tac = if (identity.tac != CellInfo.UNAVAILABLE) identity.tac else null,
+                ci = if (identity.nci != CellInfo.UNAVAILABLE_LONG) identity.nci else null,
+                rsrp = if (signal.ssRsrp != CellInfo.UNAVAILABLE) signal.ssRsrp else null,
+                rsrq = if (signal.ssRsrq != CellInfo.UNAVAILABLE) signal.ssRsrq else null,
+                sinr = if (signal.ssSinr != CellInfo.UNAVAILABLE) signal.ssSinr else null,
+                rssi = null
+            ))
+        }
+
+        val gsmCells = allCellInfo.filterIsInstance<CellInfoGsm>().filter { it.isRegistered }
+        gsmCells.forEach { cell ->
+            val identity = cell.cellIdentity as CellIdentityGsm
+            val signal = cell.cellSignalStrength as CellSignalStrengthGsm
+            carriers.add(RfAndCaData(
+                type = "GSM",
+                status = "PCell",
+                band = "GSM ARFCN ${identity.arfcn}",
+                pci = if (identity.psc != CellInfo.UNAVAILABLE) identity.psc else null,
+                tac = if (identity.lac != CellInfo.UNAVAILABLE) identity.lac else null,
+                ci = if (identity.cid != CellInfo.UNAVAILABLE) identity.cid.toLong() else null,
+                rsrp = null,
+                rsrq = null,
+                sinr = null,
+                rssi = if (signal.dbm != CellInfo.UNAVAILABLE) signal.dbm else null
+            ))
+        }
+
+        return carriers
+    }
+
+    private fun saveJsonToInternalStorage(context: Context, jsonData: String) {
+        try {
+            val fileName = "network_data_${System.currentTimeMillis()}.json"
+            val fileOutputStream: FileOutputStream = context.openFileOutput(fileName, Context.MODE_PRIVATE)
+            fileOutputStream.write(jsonData.toByteArray())
+            fileOutputStream.close()
+            Log.i("FileSave", "JSON data successfully saved to $fileName")
+        } catch (e: Exception) {
+            Log.e("FileSave", "Error saving file: ${e.message}", e)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        activityScope.cancel() // Cancel ongoing coroutines
+        activityScope.cancel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             telephonyCallback?.let {
                 telephonyManager.unregisterTelephonyCallback(it)
