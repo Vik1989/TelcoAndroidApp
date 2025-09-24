@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.telephony.*
 import android.util.Log
 import android.widget.Button
@@ -25,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.InternalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -56,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PERMISSIONS_REQUEST_CODE = 100
         private const val TEST_FILE_URL = "https://proof.ovh.net/files/10Mb.dat"
+        private const val LOG_FILE_NAME = "network_data_log.json"
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -166,22 +169,18 @@ class MainActivity : AppCompatActivity() {
     private fun updateNetworkInfo() {
         try {
             val allCellInfo = telephonyManager.allCellInfo
-
             val networkName = telephonyManager.networkOperatorName
+
             runOnUiThread {
                 networkNameTextView.text = "Network: $networkName"
             }
 
             if (allCellInfo.isNullOrEmpty()) {
                 runOnUiThread {
-                    bandTextView.text = "Network Band: N/A (No cell info)"
-                    cellsiteIdTextView.text = "Cell Site ID: N/A"
-                    rsrpTextView.text = "RSRP: N/A"
-                    rsrqTextView.text = "RSRQ: N/A"
-                    rssiTextView.text = "RSSI: N/A"
-                    sinrTextView.text = "SINR: N/A"
-                    caInfoTextView.text = "CA: N/A"
+                    displayNoSpecificCellTypeInfo()
                 }
+                // Even if empty, we attempt to log (with empty carriers)
+                logNetworkData(emptyList(), networkName)
                 return
             }
 
@@ -206,18 +205,19 @@ class MainActivity : AppCompatActivity() {
             } else {
                 displayNoSpecificCellTypeInfo()
             }
+
+            // 🔑 LOG DATA ON EVERY NETWORK CHANGE 🔑
+            logNetworkData(allCellInfo, networkName)
+
         } catch (e: SecurityException) {
-            runOnUiThread {
-                bandTextView.text = "Permissions error"
-            }
+            runOnUiThread { bandTextView.text = "Permissions error" }
         } catch (e: Exception) {
-            runOnUiThread {
-                bandTextView.text = "Error updating info: ${e.message}"
-            }
+            runOnUiThread { bandTextView.text = "Error updating info: ${e.message}" }
         }
     }
 
     private fun displayNoSpecificCellTypeInfo() {
+        // ... (existing display code)
         runOnUiThread {
             bandTextView.text = "Network Type: Unknown/Not Registered"
             cellsiteIdTextView.text = "Cell Site ID: N/A"
@@ -235,6 +235,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         val earfcn = cellIdentity.earfcn
         val band = when (earfcn) {
+            // ... (Your existing band mapping logic) ...
             in 0..599 -> "LTE Band 1 (2100MHz)"
             in 600..1199 -> "LTE Band 2 (1900MHz)"
             in 1200..1949 -> "LTE Band 3 (1800MHz)"
@@ -260,6 +261,7 @@ class MainActivity : AppCompatActivity() {
         val ci = if (cellIdentity.ci != CellInfo.UNAVAILABLE) cellIdentity.ci.toString() else "N/A"
         val cellsiteIdText = "PCI: $pci, TAC: $tac, CI: $ci"
 
+        // ... (Your existing signal display code) ...
         val rsrpValue = signalStrength.rsrp
         val rsrp = if (rsrpValue != CellInfo.UNAVAILABLE) "$rsrpValue dBm" else "N/A"
 
@@ -267,11 +269,9 @@ class MainActivity : AppCompatActivity() {
         val rsrq = if (rsrqValue != CellInfo.UNAVAILABLE) "$rsrqValue dB" else "N/A"
 
         val sinrValue = signalStrength.rssnr
-        val sinr =
-            if (sinrValue != CellInfo.UNAVAILABLE && sinrValue != Integer.MAX_VALUE) "$sinrValue dB" else "N/A"
+        val sinr = if (sinrValue != CellInfo.UNAVAILABLE && sinrValue != Integer.MAX_VALUE) "$sinrValue dB" else "N/A"
 
-        val rssiValue =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) signalStrength.rssi else CellInfo.UNAVAILABLE
+        val rssiValue = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) signalStrength.rssi else CellInfo.UNAVAILABLE
         val rssi = if (rssiValue != CellInfo.UNAVAILABLE) "$rssiValue dBm" else "N/A"
 
         runOnUiThread {
@@ -370,10 +370,12 @@ class MainActivity : AppCompatActivity() {
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun displayCaInfo(allCellInfo: List<CellInfo>) {
+        // This function is for display only, focusing on registered cells for simplicity
         val lteCells = allCellInfo.filterIsInstance<CellInfoLte>().filter { it.isRegistered }
         val nrCells = allCellInfo.filterIsInstance<CellInfoNr>().filter { it.isRegistered }
 
         val caConfig = StringBuilder()
+        // ... (Your existing display code for caConfig) ...
 
         if (nrCells.isNotEmpty()) {
             caConfig.append("5G NR Active")
@@ -445,6 +447,7 @@ class MainActivity : AppCompatActivity() {
 
         activityScope.launch(Dispatchers.IO) {
             try {
+                // ... (Existing speed test logic) ...
                 val url = URL(TEST_FILE_URL)
                 val connection = url.openConnection() as HttpURLConnection
                 connection.connectTimeout = 10000
@@ -477,7 +480,6 @@ class MainActivity : AppCompatActivity() {
                     launch(Dispatchers.Main) {
                         downloadSpeedTextView.text = "Download Speed: %.2f Mbps".format(downloadSpeedMbps)
 
-                        // FIX: Explicit runtime permission check and qualified 'this' reference
                         if (ActivityCompat.checkSelfPermission(
                                 this@MainActivity,
                                 Manifest.permission.ACCESS_FINE_LOCATION
@@ -490,7 +492,8 @@ class MainActivity : AppCompatActivity() {
                             return@launch
                         }
 
-                        saveCapturedData(downloadSpeedMbps)
+                        // 🔑 NEW FUNCTION CALL for logging speed test result 🔑
+                        logSpeedTestResult(downloadSpeedMbps)
                     }
                 } else {
                     launch(Dispatchers.Main) {
@@ -519,12 +522,11 @@ class MainActivity : AppCompatActivity() {
         return Color.rgb(red, green, 0)
     }
 
+    // 🔑 NEW: Logs data with the download speed value 🔑
     @OptIn(InternalSerializationApi::class)
     @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun saveCapturedData(downloadSpeedMbps: Double) {
-        // FIX: Explicit runtime check is already done in runSpeedTest, but keeping this
-        // try-catch block for absolute safety against concurrent permission changes.
+    private fun logSpeedTestResult(downloadSpeedMbps: Double) {
         try {
             val allCellInfo = telephonyManager.allCellInfo
             val carriers = captureNetworkData(allCellInfo)
@@ -532,38 +534,62 @@ class MainActivity : AppCompatActivity() {
             val session = NetworkSession(
                 timestamp = System.currentTimeMillis(),
                 networkName = telephonyManager.networkOperatorName,
-                downloadSpeedMbps = downloadSpeedMbps,
+                downloadSpeedMbps = downloadSpeedMbps, // Includes speed
                 carriers = carriers
             )
 
             val jsonString = Json.encodeToString(session)
-            Log.d("JSON_DATA", jsonString)
-            saveJsonToInternalStorage(applicationContext, jsonString)
+            saveJsonToExternalStorage(applicationContext, jsonString)
         } catch (e: SecurityException) {
-            Log.e("JSON_DATA", "SecurityException during data capture: ${e.message}")
+            Log.e("SPEED_LOG_ERROR", "SecurityException during speed data capture: ${e.message}")
         } catch (e: Exception) {
-            Log.e("JSON_DATA", "Error during data capture: ${e.message}")
+            Log.e("SPEED_LOG_ERROR", "Error during speed data capture: ${e.message}")
         }
     }
+
+    // 🔑 NEW: Logs passive network data (speed is null) 🔑
+    @OptIn(InternalSerializationApi::class)
+    @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_PHONE_STATE])
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun logNetworkData(allCellInfo: List<CellInfo>, networkName: String) {
+        activityScope.launch(Dispatchers.IO) {
+            try {
+                val carriers = captureNetworkData(allCellInfo)
+
+                val session = NetworkSession(
+                    timestamp = System.currentTimeMillis(),
+                    networkName = networkName,
+                    downloadSpeedMbps = null, // Null for passive log
+                    carriers = carriers
+                )
+
+                val jsonString = Json.encodeToString(session)
+                saveJsonToExternalStorage(applicationContext, jsonString)
+            } catch (e: Exception) {
+                Log.e("CONTINUOUS_LOG_ERROR", "Error during data logging: ${e.message}")
+            }
+        }
+    }
+
 
     @OptIn(InternalSerializationApi::class)
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun captureNetworkData(allCellInfo: List<CellInfo>): List<RfAndCaData> {
         val carriers = mutableListOf<RfAndCaData>()
 
-        // LTE: Filter for both registered (PCell) and unregistered (SCells) to get CA info
+        // LTE: Capture all LTE cells for potential CA reporting
         val servingLteCells = allCellInfo.filterIsInstance<CellInfoLte>()
-
         val pCellLte = servingLteCells.firstOrNull { it.isRegistered }
 
-        // 1. Process LTE PCell
-        if (pCellLte != null) {
-            val identity = pCellLte.cellIdentity as CellIdentityLte
-            val signal = pCellLte.cellSignalStrength as CellSignalStrengthLte
+        // 1. Process LTE Carriers (PCell and SCells)
+        servingLteCells.forEach { cell ->
+            val identity = cell.cellIdentity as CellIdentityLte
+            val signal = cell.cellSignalStrength as CellSignalStrengthLte
+            val status = if (cell.isRegistered) "PCell" else "SCell"
 
             carriers.add(RfAndCaData(
                 type = "LTE",
-                status = "PCell",
+                status = status,
                 band = "LTE Band ${identity.bandwidth / 1000}MHz",
                 pci = if (identity.pci != CellInfo.UNAVAILABLE) identity.pci else null,
                 tac = if (identity.tac != CellInfo.UNAVAILABLE) identity.tac else null,
@@ -573,34 +599,15 @@ class MainActivity : AppCompatActivity() {
                 sinr = if (signal.rssnr != CellInfo.UNAVAILABLE) signal.rssnr else null,
                 rssi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && signal.rssi != CellInfo.UNAVAILABLE) signal.rssi else null
             ))
-
-            // 2. Process LTE SCells (filter out PCell, rely on modem reporting SCells)
-            val sCellsLte = servingLteCells.filter { it != pCellLte }
-            sCellsLte.forEach { sCell ->
-                val sIdentity = sCell.cellIdentity as CellIdentityLte
-                val sSignal = sCell.cellSignalStrength as CellSignalStrengthLte
-                carriers.add(RfAndCaData(
-                    type = "LTE",
-                    status = "SCell",
-                    band = "LTE Band ${sIdentity.bandwidth / 1000}MHz",
-                    pci = if (sIdentity.pci != CellInfo.UNAVAILABLE) sIdentity.pci else null,
-                    tac = if (sIdentity.tac != CellInfo.UNAVAILABLE) sIdentity.tac else null,
-                    ci = if (sIdentity.ci != CellInfo.UNAVAILABLE) sIdentity.ci.toLong() else null,
-                    rsrp = if (sSignal.rsrp != CellInfo.UNAVAILABLE) sSignal.rsrp else null,
-                    rsrq = if (sSignal.rsrq != CellInfo.UNAVAILABLE) sSignal.rsrq else null,
-                    sinr = if (sSignal.rssnr != CellInfo.UNAVAILABLE) sSignal.rssnr else null,
-                    rssi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && sSignal.rssi != CellInfo.UNAVAILABLE) sSignal.rssi else null
-                ))
-            }
         }
 
-        // NR: Filter for all CellInfoNr to capture CA (PCell/Anchor and SCells)
+        // 2. Process NR Carriers (PCell/Anchor and SCells)
         val servingNrCells = allCellInfo.filterIsInstance<CellInfoNr>()
-        servingNrCells.forEachIndexed { index, cell ->
+        servingNrCells.forEach { cell ->
             val identity = cell.cellIdentity as CellIdentityNr
             val signal = cell.cellSignalStrength as CellSignalStrengthNr
 
-            // Assign status based on registration or index, but note that CA SCells are often not "registered"
+            // Assign status based on registration (PCell/Anchor) or assume SCell
             val status = if (cell.isRegistered) "PCell" else "SCell"
 
             carriers.add(RfAndCaData(
@@ -613,10 +620,11 @@ class MainActivity : AppCompatActivity() {
                 rsrp = if (signal.ssRsrp != CellInfo.UNAVAILABLE) signal.ssRsrp else null,
                 rsrq = if (signal.ssRsrq != CellInfo.UNAVAILABLE) signal.ssRsrq else null,
                 sinr = if (signal.ssSinr != CellInfo.UNAVAILABLE) signal.ssSinr else null,
-                rssi = null
+                rssi = null // RSSI is not a standard NR metric
             ))
         }
 
+        // 3. Process GSM/Other (Optional, for completeness)
         val gsmCells = allCellInfo.filterIsInstance<CellInfoGsm>().filter { it.isRegistered }
         gsmCells.forEach { cell ->
             val identity = cell.cellIdentity as CellIdentityGsm
@@ -638,15 +646,32 @@ class MainActivity : AppCompatActivity() {
         return carriers
     }
 
-    private fun saveJsonToInternalStorage(context: Context, jsonData: String) {
-        try {
-            val fileName = "network_data_${System.currentTimeMillis()}.json"
-            val fileOutputStream: FileOutputStream = context.openFileOutput(fileName, Context.MODE_PRIVATE)
-            fileOutputStream.write(jsonData.toByteArray())
-            fileOutputStream.close()
-            Log.i("FileSave", "JSON data successfully saved to $fileName")
-        } catch (e: Exception) {
-            Log.e("FileSave", "Error saving file: ${e.message}", e)
+    // 🔑 MODIFIED: Uses MODE_APPEND and JSON Lines format 🔑
+    // In MainActivity.kt, replace the old saveJsonToInternalStorage function
+
+    private fun saveJsonToExternalStorage(context: Context, jsonData: String) {
+        activityScope.launch(Dispatchers.IO) {
+            try {
+                // Get the public Downloads directory
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val logFile = File(downloadsDir, LOG_FILE_NAME)
+
+                // Check for compatibility and permissions (especially crucial before API 29)
+                if (!downloadsDir.exists()) {
+                    downloadsDir.mkdirs()
+                }
+
+                // Use FileOutputStream with append mode (true)
+                FileOutputStream(logFile, true).use { stream ->
+                    // Write the JSON line and a newline character (JSON Lines format)
+                    stream.write((jsonData + "\n").toByteArray())
+                }
+
+                Log.d("FileSave", "JSON data appended to ${logFile.absolutePath}")
+
+            } catch (e: Exception) {
+                Log.e("FileSave", "Error saving file to Downloads: ${e.message}", e)
+            }
         }
     }
 
