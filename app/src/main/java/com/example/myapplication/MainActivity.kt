@@ -30,6 +30,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Objects
 import java.util.concurrent.Executor
 
 class MainActivity : AppCompatActivity() {
@@ -371,8 +372,8 @@ class MainActivity : AppCompatActivity() {
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun displayCaInfo(allCellInfo: List<CellInfo>) {
         // This function is for display only, focusing on registered cells for simplicity
-        val lteCells = allCellInfo.filterIsInstance<CellInfoLte>().filter { it.isRegistered }
-        val nrCells = allCellInfo.filterIsInstance<CellInfoNr>().filter { it.isRegistered }
+        val lteCells = allCellInfo.filterIsInstance<CellInfoLte>()
+        val nrCells = allCellInfo.filterIsInstance<CellInfoNr>()
 
         val caConfig = StringBuilder()
         // ... (Your existing display code for caConfig) ...
@@ -422,11 +423,22 @@ class MainActivity : AppCompatActivity() {
 
                 caConfig.append("- PCell: $pCellBand, RSRP: $pCellRsrp dBm\n")
 
-                val sCells = lteCells.filter { it != pCell && it.isRegistered }
+                val sCells = lteCells.filter { it != pCell}
                 sCells.forEachIndexed { index, sCell ->
                     val sCellIdentity = sCell.cellIdentity as CellIdentityLte
                     val sCellSignalStrength = sCell.cellSignalStrength as CellSignalStrengthLte
-                    val sCellBand = "LTE Band ${sCellIdentity.bandwidth / 1000}MHz"
+                    var sCellBand: String? = null
+                    val rawBandwidth = sCellIdentity.bandwidth
+                    val bands = sCell.cellIdentity.bands
+                    if (Objects.nonNull(bands)) {
+                        sCellBand = bands[0].toString()
+                    } else if (rawBandwidth == 2147483647 || rawBandwidth <= 0 || sCellIdentity.earfcn == CellInfo.UNAVAILABLE) {
+                        sCellBand = "LTE Band UNKNOWN"
+                    } else {
+                        // If the bandwidth is valid, use it
+                        sCellBand = "LTE Band ${rawBandwidth / 1000}MHz (EARFCN ${sCellIdentity.earfcn})"
+                    }
+
                     val sCellRsrp = sCellSignalStrength.rsrp
                     caConfig.append("- SCell ${index + 1}: $sCellBand, RSRP: $sCellRsrp dBm\n")
                 }
@@ -586,11 +598,22 @@ class MainActivity : AppCompatActivity() {
             val identity = cell.cellIdentity as CellIdentityLte
             val signal = cell.cellSignalStrength as CellSignalStrengthLte
             val status = if (cell.isRegistered) "PCell" else "SCell"
+            val rawBandwidth = identity.bandwidth
+            val bands = identity.bands
+            val bandName: String
+            if (Objects.nonNull(bands)) {
+                bandName = bands[0].toString()
+            } else if (rawBandwidth == 2147483647 || rawBandwidth <= 0 || identity.earfcn == CellInfo.UNAVAILABLE) {
+                bandName = "LTE Band UNKNOWN"
+            } else {
+                // If the bandwidth is valid, use it
+                bandName = "LTE Band ${rawBandwidth / 1000}MHz (EARFCN ${identity.earfcn})"
+            }
 
             carriers.add(RfAndCaData(
                 type = "LTE",
                 status = status,
-                band = "LTE Band ${identity.bandwidth / 1000}MHz",
+                band = bandName,
                 pci = if (identity.pci != CellInfo.UNAVAILABLE) identity.pci else null,
                 tac = if (identity.tac != CellInfo.UNAVAILABLE) identity.tac else null,
                 ci = if (identity.ci != CellInfo.UNAVAILABLE) identity.ci.toLong() else null,
